@@ -1,0 +1,115 @@
+html, body, #root {
+    height: 100%;
+}
+
+body {
+    font-family: 'Segoe UI', 'Inter', Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #eef1f5;
+    color: #0f172a;
+}
+
+.dashboard-page {
+    max-width: none;
+    margin: 0;
+    padding: 18px 20px;
+    min-height: 100vh;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+}
+
+.dashboard-page > h1 {
+    flex-shrink: 0;
+    margin: 0 0 16px;
+    padding: 18px 24px;
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%);
+    color: #f8fafc;
+    border-radius: 14px;
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    box-shadow: 0 8px 24px rgba(37, 99, 235, 0.22);
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.dashboard {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+
+.release-card {
+    background: #f8fafc;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.08);
+    padding: 15px;
+    flex: 1 1 calc(33.333% - 20px);
+    min-width: 250px;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 12px;
+    color: white;
+    font-size: 0.9em;
+}
+
+.status-in-progress {
+    background-color: #9aa1ab;
+}
+
+.status-completed {
+    background-color: #6b7280;
+}
+
+.status-pending {
+    background-color: #c2c7ce;
+    color: #333a44;
+}
+
+h1 {
+    color: #2b313a;
+}
+
+h2 {
+    color: #333a44;
+}
+
+/* Taskboard styles */
+.taskboard {
+    width: 100%;
+    margin-top: 20px;
+}
+.assignees {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    overflow-x: auto;
+}
+.assignee-column {
+    background: #fff;
+    padding: 12px;
+    border-radius: 6px;
+    min-width: 220px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.task-card { 
+    border: 1px solid #eee;
+    padding: 8px;
+    margin-bottom: 8px;
+    border-radius: 4px;
+}
+.task-title { color: #222; text-decoration: none; }
+.task-meta { font-size: 0.85em; color: #666; }
+.task-tags { font-size: 0.8em; color: #999; }
+.count { font-size: 0.9em; color: #777; }
+
+.taskboard-section .error { color: red; }
