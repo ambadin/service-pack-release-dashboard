@@ -36,6 +36,12 @@ const releaseList = [
   { id: 5, title: 'Service Pack 5', status: 'In Progress', plannedDate: '2023-12-01' },
 ];
 
+// Container/platform health probe (Podman healthcheck, nginx upstream checks).
+// Deliberately unauthenticated and dependency-free so it reflects process liveness only.
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
 app.get('/api/status', (req, res) => {
   res.json({ status: 'ok', liveTfsConfigured: !!process.env.TFS_URL && !!process.env.TFS_PAT });
 });

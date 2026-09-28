@@ -53,6 +53,68 @@ Notes:
 
 Run the app and open the Dashboard to see the Taskboard under the releases section. For local development with live TFS data, run `npm install`, `npm run build`, and `npm run server`. Alternatively, use `npm run dev` during development and keep the server proxy on port 4000.
 
+## Container image (Podman/Docker)
+
+The app is packaged as a single OCI image: a multi-stage build compiles the Vite/React SPA,
+then a slim `node:22-alpine` runtime serves `dist/` and the Express API/TFS-Windchill proxy
+(`server.js`) from one non-root process. See [`docker/Containerfile`](docker/Containerfile).
+
+### Build and run locally with Podman
+
+```powershell
+cd service-pack-release-dashboard
+copy docker\.env.example docker\.env   # then edit docker\.env with your TFS/Windchill values
+
+podman build -f docker/Containerfile -t service-pack-release-dashboard:local .
+podman run -d --name spr-dashboard -p 127.0.0.1:8080:8080 --env-file docker/.env service-pack-release-dashboard:local
+
+# open http://localhost:8080/
+podman logs -f spr-dashboard
+```
+
+Or with Podman Compose (also usable from Podman Desktop):
+
+```powershell
+cd docker
+podman compose -f docker-compose.standalone.yml up -d --build
+```
+
+### Build/push helper scripts
+
+`docker/build-push.ps1` (Windows) and `docker/build-push.sh` (Linux/CI) auto-detect Podman or
+Docker, build the image with OCI labels, and optionally push to Artifactory:
+
+```powershell
+.\docker\build-push.ps1 -DryRun          # preview the command
+.\docker\build-push.ps1                  # local build only
+.\docker\build-push.ps1 -Push -Latest    # build + push (requires podman/docker login)
+```
+
+### Environment variables
+
+See [`docker/.env.example`](docker/.env.example). All integrations (TFS/Azure DevOps, Windchill)
+are optional — the dashboard falls back to mock data when unset. `NODE_EXTRA_CA_CERTS` is
+pre-set for environments with corporate TLS interception; mount the certificate as a read-only
+volume rather than baking it into the image (see the commented volume line in
+`docker/docker-compose.standalone.yml`).
+
+### Health check
+
+`GET /health` returns `{"status":"ok"}` and is used by the container `HEALTHCHECK` and by the
+per-port hosting platform's deployment health probe.
+
+### Deploying to the shared Linux/Podman/Cockpit server
+
+This image is compatible with the internal per-port application platform (rootless Podman,
+host-nginx TLS termination, one public HTTPS port per app). It expects:
+
+- Container listens on a single port (`PORT`, default `8080`).
+- No persistent volumes are required (no database).
+- Health path: `/health`.
+
+Publish the image to the approved registry, then follow the platform's onboarding steps to
+allocate ports and register the application definition.
+
 ## Project Structure
 
 - `src/components`: Contains reusable components such as `Dashboard`, `ReleaseCard`, and `StatusBadge`.
