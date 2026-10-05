@@ -4,14 +4,22 @@ const axios = require('axios');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
-const { spawn } = require('child_process');
-const httpntlm = require('httpntlm');
 
 const app = express();
 const port = process.env.PORT || 4000;
 
-app.use(cors());
+// CORS is restricted to an explicit allow-list. The SPA and this API are
+// served same-origin by design, so ALLOWED_ORIGINS is unset (cross-origin
+// access disabled) unless a specific split-origin deployment needs it.
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: allowedOrigins.length > 0 ? allowedOrigins : false,
+  methods: ['GET', 'POST'],
+}));
 app.use(express.json());
 
 const buildAuthHeader = (pat) => {
@@ -100,186 +108,80 @@ app.get('/api/tasks', async (req, res) => {
   }
 });
 
-const WINDCHILL_DOC_URL =
-  process.env.WINDCHILL_DOC_URL ||
-  'https://www.windchill.plm.philips.com/Windchill/servlet/AttachmentsDownloadDirectionServlet?oid=OR:wt.doc.WTDocument:11855432544&oid=OR:wt.content.ApplicationData:11855441831&role=PRIMARY';
-
-const openFileWithDefaultApp = (filePath) => {
-  if (process.platform === 'win32') {
-    spawn('cmd', ['/c', 'start', '', filePath], { detached: true, stdio: 'ignore' }).unref();
-  } else if (process.platform === 'darwin') {
-    spawn('open', [filePath], { detached: true, stdio: 'ignore' }).unref();
-  } else {
-    spawn('xdg-open', [filePath], { detached: true, stdio: 'ignore' }).unref();
-  }
-};
-
-app.get('/api/open-windchill-doc', async (req, res) => {
-  const user = process.env.WINDCHILL_USER;
-  const password = process.env.WINDCHILL_PASSWORD;
-
-  if (!user || !password) {
-    return res.status(400).json({
-      error:
-        'Windchill credentials are not configured. Set WINDCHILL_USER and WINDCHILL_PASSWORD in your .env file.',
-    });
-  }
-
-  try {
-    const response = await axios.get(WINDCHILL_DOC_URL, {
-      responseType: 'arraybuffer',
-      auth: { username: user, password },
-    });
-
-    let fileName = 'windchill-document.xlsx';
-    const disposition = response.headers['content-disposition'];
-    if (disposition) {
-      const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
-      if (match && match[1]) {
-        fileName = decodeURIComponent(match[1].trim());
-      }
-    }
-
-    const filePath = path.join(os.tmpdir(), fileName);
-    fs.writeFileSync(filePath, Buffer.from(response.data));
-    openFileWithDefaultApp(filePath);
-
-    return res.json({ status: 'ok', opened: filePath });
-  } catch (error) {
-    console.error('Error downloading Windchill document:', error?.message || error);
-    return res.status(500).json({
-      error: 'Failed to download or open the Windchill document',
-      detail: error?.message || String(error),
-    });
-  }
-});
-
-// ── Windchill download helper (NTLM only) ────────────────────────────────
-// Performs a full NTLM handshake. Supports 'user' and 'DOMAIN\user' formats.
-// Never logs credentials.
-const ntlmGet = (opts) =>
-  new Promise((resolve, reject) =>
-    httpntlm.get(opts, (err, res) => (err ? reject(err) : resolve(res)))
-  );
-
-const downloadWindchill = async (url, rawUsername, password) => {
-  let domain = '';
-  let username = rawUsername;
-  if (rawUsername.includes('\\')) {
-    [domain, username] = rawUsername.split('\\', 2);
-  }
-  const res = await ntlmGet({ url, username, password, workstation: '', domain });
-  return { status: res.statusCode, headers: res.headers, body: res.body };
-};
-
-// Download the product list from Windchill and return it as base64 for
-// inline rendering in the dashboard.
-// Credentials come from the POST body (UI modal) or .env as a silent fallback.
-// NOTE: credentials are NEVER logged.
-app.post('/api/windchill-product-list', async (req, res) => {
-  const rawUsername = req.body?.username || process.env.WINDCHILL_USER;
-  const password = req.body?.password || process.env.WINDCHILL_PASSWORD;
-
-  if (!rawUsername || !password) {
-    return res.status(400).json({ error: 'Windchill credentials are required.' });
-  }
-
-  try {
-    const response = await downloadWindchill(WINDCHILL_DOC_URL, rawUsername, password);
-
-    if (response.status === 401 || response.status === 403) {
-      return res.status(401).json({ error: 'Invalid credentials. Please check your Windchill username and password.' });
-    }
-    if (response.status === 301 || response.status === 302) {
-      return res.status(401).json({ error: 'Authentication failed — Windchill redirected to a login page. Check your credentials.' });
-    }
-    if (response.status !== 200) {
-      return res.status(502).json({ error: `Windchill returned HTTP ${response.status}.` });
-    }
-
-    const contentType = (response.headers['content-type'] || '').toLowerCase();
-    if (contentType.includes('text/html')) {
-      return res.status(401).json({ error: 'Authentication failed — received a login page instead of the document. Check your credentials.' });
-    }
-
-    let fileName = 'IB System Release Versions.xlsx';
-    const disposition = response.headers['content-disposition'];
-    if (disposition) {
-      const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition);
-      if (match && match[1]) fileName = decodeURIComponent(match[1].trim());
-    }
-
-    return res.json({
-      fileName,
-      dataBase64: response.body.toString('base64'),
-      source: 'windchill',
-    });
-  } catch (error) {
-    // Log only the error code/type, never the credentials
-    console.error('Windchill product list error:', error?.code || error?.message || 'unknown');
-    return res.status(500).json({
-      error: 'Could not reach Windchill. Check your network connection and VPN.',
-      detail: error?.code || error?.message,
-    });
-  }
-});
-
-// Return the newest matching spreadsheet from the user's Downloads folder as
-// base64, so the freshly downloaded Windchill file can be shown directly.
-app.get('/api/product-list', (req, res) => {
-  const since = Number(req.query.since) || 0;
-  const downloadsDir = path.join(os.homedir(), 'Downloads');
-
-  try {
-    if (!fs.existsSync(downloadsDir)) {
-      return res.status(404).json({ error: 'Downloads folder not found.' });
-    }
-
-    const all = fs
-      .readdirSync(downloadsDir)
-      .filter((name) => /\.(xlsx|xls|csv)$/i.test(name))
-      .filter((name) => !/^~\$/.test(name))
-      .map((name) => {
-        const full = path.join(downloadsDir, name);
-        return { name, full, mtime: fs.statSync(full).mtimeMs };
-      })
-      .filter((f) => (since ? f.mtime >= since : true))
-      .sort((a, b) => b.mtime - a.mtime);
-
-    // Prefer the Windchill product list file by name; fall back to newest sheet.
-    const preferred = all.filter((f) => /IB System Release Versions/i.test(f.name));
-    const chosen = (preferred.length ? preferred : all)[0];
-
-    if (!chosen) {
-      return res.status(204).end();
-    }
-
-    const data = fs.readFileSync(chosen.full);
-    return res.json({
-      fileName: chosen.name,
-      dataBase64: data.toString('base64'),
-    });
-  } catch (error) {
-    console.error('Error reading product list file:', error?.message || error);
-    return res.status(500).json({ error: 'Failed to read the downloaded file', detail: error?.message || String(error) });
-  }
-});
+// Source of truth for the planning workbook. Set SP_PLANNING_XLSX_PATH to read
+// live from the shared network location instead of the bundled snapshot —
+// e.g. on Windows: \\ingbtcpic1vwsfs.code1.emi.philips.com\Bangalore3\Projects\DXR\FSA\Service pack planning sheet\service-pack-planning.xlsx
+// On the Linux/Podman deployment this must be a POSIX path to a CIFS/SMB
+// mount of that same share (Node cannot resolve a Windows UNC path on
+// Linux) — see docker/README-deploy.md "Planning workbook source".
+// If unset, or if the configured path is temporarily unreadable (network
+// share unavailable), the bundled copy shipped in the repo is served instead
+// so the dashboard degrades gracefully rather than failing outright.
+const BUNDLED_XLSX_PATH = path.join(__dirname, 'service-pack-planning.xlsx');
 
 app.get('/api/service-pack-xlsx', (req, res) => {
-  const filePath = path.join(__dirname, 'service-pack-planning.xlsx');
-  try {
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'service-pack-planning.xlsx not found on server.' });
+  const externalPath = process.env.SP_PLANNING_XLSX_PATH;
+  const candidates = externalPath
+    ? [{ filePath: externalPath, source: 'external' }, { filePath: BUNDLED_XLSX_PATH, source: 'bundled-fallback' }]
+    : [{ filePath: BUNDLED_XLSX_PATH, source: 'bundled' }];
+
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate.filePath)) continue;
+      const data = fs.readFileSync(candidate.filePath);
+      if (candidate.source === 'bundled-fallback') {
+        console.warn(`SP_PLANNING_XLSX_PATH ("${externalPath}") was unreadable; served the bundled fallback copy instead.`);
+      }
+      return res.json({
+        fileName: path.basename(candidate.filePath),
+        dataBase64: data.toString('base64'),
+        source: candidate.source,
+      });
+    } catch (error) {
+      console.error(`Error reading planning workbook at "${candidate.filePath}":`, error?.message || error);
+      // fall through to the next candidate (bundled fallback, if any)
     }
-    const data = fs.readFileSync(filePath);
-    return res.json({
-      fileName: 'service-pack-planning.xlsx',
-      dataBase64: data.toString('base64'),
-    });
-  } catch (error) {
-    console.error('Error reading service-pack-planning.xlsx:', error?.message || error);
-    return res.status(500).json({ error: 'Failed to read service-pack-planning.xlsx', detail: error?.message || String(error) });
   }
+
+  return res.status(404).json({ error: 'service-pack-planning.xlsx not found (checked configured source and bundled fallback).' });
+});
+
+// Source of truth for the SP Guideline PDF. Set SP_GUIDELINE_PDF_PATH to read
+// live from the shared network location instead of the bundled snapshot —
+// e.g. on Windows: \\ingbtcpic1vwsfs.code1.emi.philips.com\Bangalore3\Projects\DXR\FSA\Service pack planning sheet\2009001390 Service Pack Guideline_en 1.pdf
+// On the Linux/Podman deployment this must be a POSIX path to a CIFS/SMB
+// mount of that same share (see docker/README-deploy.md "Planning workbook
+// source" for the equivalent xlsx setup). If unset, or if the configured
+// path is temporarily unreadable, the bundled copy is served instead.
+//
+// The bundled fallback lives in dist/, not public/: Vite copies public/'s
+// contents into dist/ at build time, and dist/ is the only one of the two
+// actually shipped in the container image (the Containerfile never COPYs a
+// standalone public/ directory) — so dist/ is the single correct location
+// for both native and containerized execution after any build.
+const BUNDLED_GUIDELINE_PDF_PATH = path.join(__dirname, 'dist', '2009001390 Service Pack Guideline_en.pdf');
+
+app.get('/api/sp-guideline-pdf', (req, res) => {
+  const externalPath = process.env.SP_GUIDELINE_PDF_PATH;
+  const candidates = externalPath
+    ? [{ filePath: externalPath, source: 'external' }, { filePath: BUNDLED_GUIDELINE_PDF_PATH, source: 'bundled-fallback' }]
+    : [{ filePath: BUNDLED_GUIDELINE_PDF_PATH, source: 'bundled' }];
+
+  for (const candidate of candidates) {
+    try {
+      if (!fs.existsSync(candidate.filePath)) continue;
+      if (candidate.source === 'bundled-fallback') {
+        console.warn(`SP_GUIDELINE_PDF_PATH ("${externalPath}") was unreadable; served the bundled fallback copy instead.`);
+      }
+      res.setHeader('Content-Type', 'application/pdf');
+      return res.sendFile(candidate.filePath);
+    } catch (error) {
+      console.error(`Error reading SP Guideline PDF at "${candidate.filePath}":`, error?.message || error);
+      // fall through to the next candidate (bundled fallback, if any)
+    }
+  }
+
+  return res.status(404).json({ error: 'SP Guideline PDF not found (checked configured source and bundled fallback).' });
 });
 
 app.use(express.static(path.join(__dirname, 'dist')));

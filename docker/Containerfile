@@ -32,15 +32,24 @@ RUN apk add --no-cache libc6-compat ca-certificates
 
 WORKDIR /app
 
-# Corporate CA is mounted at runtime via volume, not baked into the image (see docker/.env.example).
+# Corporate CA handling: NODE_EXTRA_CA_CERTS is declared here but the
+# certificate is NEVER baked into the image (see docker/README-deploy.md
+# "Corporate CA handling" for the required operator decision: mount it
+# read-only at this exact path, or remove this ENV line if the deployment
+# network path does not intercept TLS).
 ENV NODE_ENV=production \
     NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/corporate-ca.crt \
     HOSTNAME=0.0.0.0 \
     PORT=8080
 
-# Production-only install — dotenv/express/axios/cors/httpntlm are runtime dependencies.
+# Production-only install — dotenv/express/axios/cors/httpntlm are runtime dependencies
+# (react/react-dom/react-router-dom/typescript are devDependencies, only used by the
+# Vite build in the builder stage, and are never installed here).
+# Cleanup removes npm's root-owned cache/log remnants left behind before USER node runs.
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+RUN npm ci --omit=dev --no-audit --no-fund \
+    && npm cache clean --force \
+    && rm -rf /root/.npm /tmp/*
 
 COPY server.js ./
 # Read directly from disk by the /api/service-pack-xlsx route (not part of the Vite bundle)

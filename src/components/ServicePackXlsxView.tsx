@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 
 // ── SheetJS CDN loader ────────────────────────────────────────────────────────
-const loadXLSX = (): Promise<any> => {
+export const loadXLSX = (): Promise<any> => {
     const existing = (window as any).XLSX;
     if (existing) return Promise.resolve(existing);
     return new Promise((resolve, reject) => {
@@ -20,7 +20,7 @@ const loadXLSX = (): Promise<any> => {
 let cachedBytes: Uint8Array | null = null;
 let inflightPromise: Promise<Uint8Array> | null = null;
 
-const getXlsxBytes = (): Promise<Uint8Array> => {
+export const getXlsxBytes = (): Promise<Uint8Array> => {
     if (cachedBytes) return Promise.resolve(cachedBytes);
     if (inflightPromise) return inflightPromise;
     inflightPromise = fetch('/api/service-pack-xlsx')

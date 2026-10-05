@@ -54,7 +54,7 @@
   border-left: 4px solid #2563eb;
   border-radius: 10px;
   padding: 10px 16px;
-  flex: 1 1 0;
+  flex: 0 0 auto;
   min-height: 56px;
 }
 
@@ -184,5 +184,13 @@
 @media (max-width: 720px) {
   .strategy-layout {
     grid-template-columns: 1fr;
+  }
+
+  /* When the row wraps, left-align the quarter chips under the title
+     instead of right-floating them, so the wrapped layout still reads as
+     an intentional two-line row rather than an awkward flex-wrap artifact. */
+  .strategy-right {
+    justify-content: flex-start;
+    width: 100%;
   }
 }

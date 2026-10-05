@@ -8,6 +8,11 @@ This project is a dashboard application designed to display the status and plann
 - **Release Cards**: Each release is represented by a card displaying its title, status, and planned release date.
 - **Status Badges**: Visual indicators for the status of each release, color-coded for easy identification.
 - **Data Management**: Custom hooks to fetch and manage release data efficiently.
+- **Quarterly Status**: One tab with a Q1–Q4 sub-tab strip; each quarter shows a chart (X = OS version,
+  Y = week) of the planned schedule per milestone phase, plus the full detailed status table below.
+  When the live planning sheet includes an "Actual" column (see below), an additional Actual marker
+  is plotted per product — green if on time or early, red if later than the planned InCenter release
+  week.
 
 ## Getting Started
 
@@ -53,24 +58,48 @@ Notes:
 
 Run the app and open the Dashboard to see the Taskboard under the releases section. For local development with live TFS data, run `npm install`, `npm run build`, and `npm run server`. Alternatively, use `npm run dev` during development and keep the server proxy on port 4000.
 
+## Quarterly Status and the planning workbook source
+
+`GET /api/service-pack-xlsx` serves `service-pack-planning.xlsx`, which backs both the Quarterly
+Status charts/tables and the SP 2026 Plan view. By default it serves the bundled snapshot in this
+repo. Set `SP_PLANNING_XLSX_PATH` to read live from the internal network share instead — see
+[`docker/README-deploy.md`](docker/README-deploy.md) section "Planning workbook source" for the
+exact path, the Linux CIFS-mount requirement for containerized deployments, and the graceful
+fallback behavior if the share is temporarily unreachable.
+
+The chart's phase columns and the optional trailing "Actual" column are discovered from each
+quarter sheet's own header row (not hardcoded), since the live sheet's schema currently differs
+across quarters (Q1/Q2 have no Actual column yet; Q3/Q4 do).
+
+## SP Guideline PDF source
+
+`GET /api/sp-guideline-pdf` serves the PDF shown under the SP Guideline tab, using the same
+live-source-with-fallback pattern: set `SP_GUIDELINE_PDF_PATH` to read live from the internal
+network share, or leave it unset to serve the bundled copy in `public/`. See
+[`docker/README-deploy.md`](docker/README-deploy.md) section "Planning workbook source" for the
+exact path and the Linux CIFS-mount requirement (same share as the planning workbook).
+
 ## Container image (Podman/Docker)
 
 The app is packaged as a single OCI image: a multi-stage build compiles the Vite/React SPA,
-then a slim `node:22-alpine` runtime serves `dist/` and the Express API/TFS-Windchill proxy
+then a slim `node:22-alpine` runtime serves `dist/` and the Express API/TFS proxy
 (`server.js`) from one non-root process. See [`docker/Containerfile`](docker/Containerfile).
 
 ### Build and run locally with Podman
 
 ```powershell
 cd service-pack-release-dashboard
-copy docker\.env.example docker\.env   # then edit docker\.env with your TFS/Windchill values
+copy docker\.env.example docker\.env   # then edit docker\.env with your TFS values (optional)
 
-podman build -f docker/Containerfile -t service-pack-release-dashboard:local .
+podman build --format docker -f docker/Containerfile -t service-pack-release-dashboard:local .
 podman run -d --name spr-dashboard -p 127.0.0.1:8080:8080 --env-file docker/.env service-pack-release-dashboard:local
 
 # open http://localhost:8080/
 podman logs -f spr-dashboard
 ```
+
+> Use `--format docker`: Podman defaults to OCI image format, which silently drops the
+> `HEALTHCHECK` instruction. Docker format preserves it.
 
 Or with Podman Compose (also usable from Podman Desktop):
 
@@ -92,8 +121,8 @@ Docker, build the image with OCI labels, and optionally push to Artifactory:
 
 ### Environment variables
 
-See [`docker/.env.example`](docker/.env.example). All integrations (TFS/Azure DevOps, Windchill)
-are optional — the dashboard falls back to mock data when unset. `NODE_EXTRA_CA_CERTS` is
+See [`docker/.env.example`](docker/.env.example). The TFS/Azure DevOps integration is
+optional — the dashboard falls back to mock data when unset. `NODE_EXTRA_CA_CERTS` is
 pre-set for environments with corporate TLS interception; mount the certificate as a read-only
 volume rather than baking it into the image (see the commented volume line in
 `docker/docker-compose.standalone.yml`).
@@ -109,15 +138,20 @@ This image is compatible with the internal per-port application platform (rootle
 host-nginx TLS termination, one public HTTPS port per app). It expects:
 
 - Container listens on a single port (`PORT`, default `8080`).
-- No persistent volumes are required (no database).
+- No persistent volumes required by default; a read-only CIFS-mount volume is only needed if
+  `SP_PLANNING_XLSX_PATH` is configured to read the live planning workbook (see above).
 - Health path: `/health`.
 
 Publish the image to the approved registry, then follow the platform's onboarding steps to
-allocate ports and register the application definition.
+allocate ports and register the application definition. For the full hardened production
+walkthrough (secret mounting, corporate CA decision, CORS, nginx reverse-proxy config, image
+export), see [`docker/README-deploy.md`](docker/README-deploy.md).
 
 ## Project Structure
 
-- `src/components`: Contains reusable components such as `Dashboard`, `ReleaseCard`, and `StatusBadge`.
+- `src/components`: Contains reusable components such as `Dashboard`, `ReleaseCard`, and `StatusBadge`,
+  plus `QuarterlyStatus`/`QuarterlyScheduleChart` (Q1–Q4 sub-tabs, chart, and status table) and
+  `ServicePackXlsxView` (the shared xlsx fetch/parse used by both the chart and status tables).
 - `src/pages`: Contains the main page component `DashboardPage`.
 - `src/data`: Contains the data structure for service pack releases.
 - `src/hooks`: Contains custom hooks for managing release data.

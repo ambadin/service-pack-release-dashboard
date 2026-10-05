@@ -18,11 +18,12 @@ services:
     # machine networking requires it.
     ports:
       - "127.0.0.1:${HOST_PORT:-8080}:${PORT:-8080}"
-    # Uncomment only if your environment intercepts TLS (see .env.example / Section 6
-    # of the containerization guide). Leaving this active without the file on the
-    # host causes Podman to create corporate-ca.crt as an empty directory.
+    # Corporate CA decision required before production use (see README-deploy.md
+    # "Corporate CA handling"). Uncomment only if the deployment network path
+    # intercepts TLS. Leaving this active without the file on disk causes
+    # Podman to create corporate-ca.crt as an empty directory instead of a file.
     # volumes:
-    #   - "${DB_DATA_PATH:-../data}/corporate-ca.crt:/usr/local/share/ca-certificates/corporate-ca.crt:ro"
+    #   - "../data/corporate-ca.crt:/usr/local/share/ca-certificates/corporate-ca.crt:ro"
     security_opt:
       - no-new-privileges
     restart: unless-stopped
