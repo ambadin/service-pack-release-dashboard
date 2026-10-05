@@ -13,11 +13,12 @@ the container publishes only to loopback; one public HTTPS port per app).
 | [`Containerfile`](Containerfile) | Multi-stage build (Vite SPA build → slim `node:22-alpine` runtime) |
 | [`.containerignore`](../.containerignore) / [`.dockerignore`](../.dockerignore) | Build-context exclusions (secrets, `.git`, dev tooling) — kept in sync |
 | [`.env.example`](.env.example) | Application variable **names only** — no values |
+| `.env` (next to the exported tar) | Runtime container paths for the shared workbook and PDF; transfer separately, never bake into the image |
 | `README-deploy.md` | This file |
 | `service-pack-release-dashboard.tar` | Exported image (`podman save`) — generate per Section 4; not committed to git |
 
-None of these files contain a populated `.env`, a TFS PAT, a TLS private
-key, or a corporate certificate.
+The delivered `.env` contains only file paths. The image contains no `.env`,
+TFS PAT, TLS private key, or corporate certificate.
 
 ## 1. What the image contains — and does not
 
@@ -121,20 +122,28 @@ unreadable, the server falls back to the bundled copy and logs a warning
 Podman/WSL host) cannot resolve `\\server\share\...` syntax directly. For
 any containerized deployment:
 
-1. Mount the share on the **host** via a CIFS/SMB client to a stable POSIX
-   path, e.g. (Linux host, requires `cifs-utils` and a credentials file with
-   the domain service account, mode `0600`):
+1. Mount the **Bangalore3 share** on the **host** via a CIFS/SMB client to a
+   stable POSIX path (Linux host, requires `cifs-utils` and a host-owned
+   credentials file with the domain service account, mode `0600`; confirm
+   the server's supported SMB version with its administrator):
    ```bash
-   mount -t cifs "//ingbtcpic1vwsfs.code1.emi.philips.com/Bangalore3/Projects/DXR/FSA/Service pack planning sheet" \
-     /mnt/sp-planning -o credentials=/etc/sp-planning-cifs-credentials,ro,vers=3.0
+   sudo mkdir -p /mnt/bangalore3
+   sudo mount -t cifs '//ingbtcpic1vwsfs.code1.emi.philips.com/Bangalore3' \
+     /mnt/bangalore3 -o credentials=/etc/sp-planning-cifs-credentials,ro,vers=3.0
+   ls -l '/mnt/bangalore3/Projects/DXR/FSA/Service pack planning sheet/service-pack-planning.xlsx' \
+     '/mnt/bangalore3/Projects/DXR/FSA/Service pack planning sheet/2009001390 Service Pack Guideline_en 1.pdf'
    ```
-2. Bind-mount that host path read-only into the container:
+   Confirm the container user can read both files; a successful ping does not
+   establish SMB access or file permissions. The host administrator must
+   arrange for the CIFS mount to persist across server restarts.
+2. Bind-mount the share read-only into the container:
    ```bash
-   -v /mnt/sp-planning:/mnt/sp-planning:ro
+   -v /mnt/bangalore3:/mnt/bangalore3:ro
    ```
-3. Point the app at the in-container path:
+3. Point the app at the in-container paths in the runtime `.env`:
    ```
-   SP_PLANNING_XLSX_PATH=/mnt/sp-planning/service-pack-planning.xlsx
+   SP_PLANNING_XLSX_PATH=/mnt/bangalore3/Projects/DXR/FSA/Service pack planning sheet/service-pack-planning.xlsx
+   SP_GUIDELINE_PDF_PATH=/mnt/bangalore3/Projects/DXR/FSA/Service pack planning sheet/2009001390 Service Pack Guideline_en 1.pdf
    ```
 
 Do not put the CIFS credentials file inside the image or the git repository.
@@ -147,11 +156,8 @@ Treat it as a host-owned secret, same class as the JFrog pull credential.
 \\ingbtcpic1vwsfs.code1.emi.philips.com\Bangalore3\Projects\DXR\FSA\Service pack planning sheet\2009001390 Service Pack Guideline_en 1.pdf
 ```
 
-Since it's the same share, one CIFS mount covers both files — just add a
-second bind-mount line and a second in-container path:
-```
-SP_GUIDELINE_PDF_PATH=/mnt/sp-planning/2009001390 Service Pack Guideline_en 1.pdf
-```
+Since it's the same share, one CIFS mount and one container bind mount cover
+both files. Do not set either path to a Windows UNC path in a Linux container.
 
 ## 4. Build, verify, and export the image
 
@@ -185,29 +191,41 @@ into the image):
 NGINX public :18087 (TLS)  →  Podman loopback :28087  →  container :8080
 ```
 
-### 5.1 Runtime secret (`.env`)
+### 5.1 Runtime configuration (`.env`)
 
-Populate a copy of [`.env.example`](.env.example) on the host, outside git,
-then lock down its permissions and owner to match the image's non-root
-`node` user (uid:gid `1000:1000`):
+Copy the `.env` delivered alongside the image tar to the host (or populate
+a copy of [`.env.example`](.env.example)). The delivered file contains only
+the two in-container planning/PDF paths shown in Section 3b. Adjust the
+paths if the administrator chooses a different container mount point.
+Keep credentials out of this file; if adding TFS credentials later, protect
+and distribute it as a secret. Install it outside git, readable only by
+the account that runs Podman:
 
 ```bash
-install -o 1000 -g 1000 -m 0400 /path/to/populated.env /opt/spr-dashboard/.env
+install -d -m 0700 /opt/spr-dashboard
+install -m 0600 /path/to/transferred/.env /opt/spr-dashboard/.env
 ```
 
-Mount it read-only at the path `dotenv` already loads by default
-(`server.js` calls `require('dotenv').config()`, which reads `.env` from
-`process.cwd()` — the image's `WORKDIR /app`):
+Run from the same account that owns the env file. Podman passes the file's
+variables to the container via `--env-file` (do not bake it into the image).
+The host mount must already exist and contain both files:
 
 ```bash
 podman run -d --name spr-dashboard \
   --restart unless-stopped \
   --publish 127.0.0.1:28087:8080 \
   --security-opt no-new-privileges \
-  -v /opt/spr-dashboard/.env:/app/.env:ro \
-  service-pack-release-dashboard:1.0.0
-  # add the corporate-ca.crt volume from Section 3 only if decision (A) applies
+  --env-file /opt/spr-dashboard/.env \
+  -v /mnt/bangalore3:/mnt/bangalore3:ro \
+  localhost/service-pack-release-dashboard:1.2.0
 ```
+
+If decision (A) in Section 3 applies, add its CA bind mount to this command.
+If the container already exists, it must be recreated to change its env
+file or bind mounts. Changing workbook/PDF contents in the mounted share
+requires no new image; use **Refresh data** in the dashboard. Check
+`GET /api/service-pack-xlsx` for `"source":"external"`; `"bundled-fallback"`
+indicates the configured external workbook was not read.
 
 ### 5.2 Health check
 
