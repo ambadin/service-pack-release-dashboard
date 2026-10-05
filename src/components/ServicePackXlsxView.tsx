@@ -20,6 +20,25 @@ export const loadXLSX = (): Promise<any> => {
 let cachedBytes: Uint8Array | null = null;
 let inflightPromise: Promise<Uint8Array> | null = null;
 
+// Populated from the API response's `source` field ("external" | "bundled" |
+// "bundled-fallback") and the time of the last successful fetch, so the UI
+// can show where the data actually came from without a server round trip.
+export interface XlsxFetchMeta {
+    source: string;
+    fetchedAt: Date;
+}
+let lastFetchMeta: XlsxFetchMeta | null = null;
+export const getXlsxFetchMeta = (): XlsxFetchMeta | null => lastFetchMeta;
+
+// Clears the in-memory cache so the next getXlsxBytes() call performs a real
+// network fetch instead of reusing stale bytes. Call this from a "Refresh
+// data" action after editing the source workbook — a full page reload is not
+// required.
+export const invalidateXlsxCache = (): void => {
+    cachedBytes = null;
+    inflightPromise = null;
+};
+
 export const getXlsxBytes = (): Promise<Uint8Array> => {
     if (cachedBytes) return Promise.resolve(cachedBytes);
     if (inflightPromise) return inflightPromise;
@@ -28,11 +47,12 @@ export const getXlsxBytes = (): Promise<Uint8Array> => {
             if (!res.ok) throw new Error(`Server returned ${res.status}. Make sure the Express server is running (npm run server).`);
             return res.json();
         })
-        .then((payload: { dataBase64: string }) => {
+        .then((payload: { dataBase64: string; source: string }) => {
             const binary = window.atob(payload.dataBase64);
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
             cachedBytes = bytes;
+            lastFetchMeta = { source: payload.source, fetchedAt: new Date() };
             return bytes;
         })
         .catch((err) => {
@@ -56,9 +76,11 @@ const statusClass = (value: string): string => {
 interface Props {
     sheetName: string;
     title?: string;
+    /** Bump this (e.g. a counter) to force a re-fetch after invalidateXlsxCache(). */
+    refreshToken?: number;
 }
 
-const ServicePackXlsxView: React.FC<Props> = ({ sheetName, title }) => {
+const ServicePackXlsxView: React.FC<Props> = ({ sheetName, title, refreshToken }) => {
     const [rows, setRows] = useState<string[][]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string>('');
@@ -96,7 +118,7 @@ const ServicePackXlsxView: React.FC<Props> = ({ sheetName, title }) => {
             });
 
         return () => { cancelled = true; };
-    }, [sheetName]);
+    }, [sheetName, refreshToken]);
 
     if (loading) {
         return <div className="xlsx-state xlsx-state--loading">Loading {title || sheetName}…</div>;

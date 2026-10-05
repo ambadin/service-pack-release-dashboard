@@ -146,9 +146,11 @@ const comparisonColor = (p: ProductSchedule): string => {
 interface Props {
     sheetName: string;
     title?: string;
+    /** Bump this (e.g. a counter) to force a re-fetch after invalidateXlsxCache(). */
+    refreshToken?: number;
 }
 
-const QuarterlyScheduleChart: React.FC<Props> = ({ sheetName, title }) => {
+const QuarterlyScheduleChart: React.FC<Props> = ({ sheetName, title, refreshToken }) => {
     const [sheetData, setSheetData] = useState<QuarterSheetData | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string>('');
@@ -178,7 +180,7 @@ const QuarterlyScheduleChart: React.FC<Props> = ({ sheetName, title }) => {
             });
 
         return () => { cancelled = true; };
-    }, [sheetName]);
+    }, [sheetName, refreshToken]);
 
     // Only show real observed week values as Y-axis ticks (not arbitrary
     // rounded numbers), so every tick reads as a genuine "Wk NN'YY" label.

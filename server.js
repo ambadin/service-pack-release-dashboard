@@ -120,6 +120,10 @@ app.get('/api/tasks', async (req, res) => {
 const BUNDLED_XLSX_PATH = path.join(__dirname, 'service-pack-planning.xlsx');
 
 app.get('/api/service-pack-xlsx', (req, res) => {
+  // Always re-read from disk and never let the browser cache this response —
+  // the whole point of SP_PLANNING_XLSX_PATH is that edits to the live
+  // workbook show up on the next fetch, not the next deployment.
+  res.setHeader('Cache-Control', 'no-store');
   const externalPath = process.env.SP_PLANNING_XLSX_PATH;
   const candidates = externalPath
     ? [{ filePath: externalPath, source: 'external' }, { filePath: BUNDLED_XLSX_PATH, source: 'bundled-fallback' }]
@@ -162,6 +166,7 @@ app.get('/api/service-pack-xlsx', (req, res) => {
 const BUNDLED_GUIDELINE_PDF_PATH = path.join(__dirname, 'dist', '2009001390 Service Pack Guideline_en.pdf');
 
 app.get('/api/sp-guideline-pdf', (req, res) => {
+  res.setHeader('Cache-Control', 'no-store');
   const externalPath = process.env.SP_GUIDELINE_PDF_PATH;
   const candidates = externalPath
     ? [{ filePath: externalPath, source: 'external' }, { filePath: BUNDLED_GUIDELINE_PDF_PATH, source: 'bundled-fallback' }]
@@ -174,7 +179,10 @@ app.get('/api/sp-guideline-pdf', (req, res) => {
         console.warn(`SP_GUIDELINE_PDF_PATH ("${externalPath}") was unreadable; served the bundled fallback copy instead.`);
       }
       res.setHeader('Content-Type', 'application/pdf');
-      return res.sendFile(candidate.filePath);
+      // cacheControl/lastModified/etag: false — res.sendFile() otherwise sets
+      // its own Cache-Control/conditional-GET headers that would silently
+      // override the no-store header set above.
+      return res.sendFile(candidate.filePath, { cacheControl: false, lastModified: false, etag: false });
     } catch (error) {
       console.error(`Error reading SP Guideline PDF at "${candidate.filePath}":`, error?.message || error);
       // fall through to the next candidate (bundled fallback, if any)
