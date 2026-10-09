@@ -159,6 +159,16 @@ Treat it as a host-owned secret, same class as the JFrog pull credential.
 Since it's the same share, one CIFS mount and one container bind mount cover
 both files. Do not set either path to a Windows UNC path in a Linux container.
 
+**IB System Release Versions workbook** follows the same pattern via
+`IB_SYSTEM_VERSIONS_XLSX_PATH` (`GET /api/ib-system-versions-xlsx`). It is
+optional: if unset, the copy bundled in the image is shown. To read it live,
+place the workbook on the Bangalore3 share (covered by the same mount) and
+add the in-container path to the runtime `.env`, e.g.:
+
+```
+IB_SYSTEM_VERSIONS_XLSX_PATH=/mnt/bangalore3/Projects/DXR/FSA/Service pack planning sheet/IB System Release Versions.xlsx
+```
+
 ## 4. Build, verify, and export the image
 
 Run on the Linux Podman host (or transfer the resulting `.tar`):
@@ -169,17 +179,17 @@ cd service-pack-release-dashboard
 
 # Build in Docker image format so HEALTHCHECK is preserved
 # (Podman defaults to OCI format, which silently drops HEALTHCHECK)
-podman build --format docker -f docker/Containerfile -t service-pack-release-dashboard:1.0.0 .
+podman build --format docker -f docker/Containerfile -t service-pack-release-dashboard:1.3.0 .
 
 # Confirm image contents and healthcheck are present
-podman inspect service-pack-release-dashboard:1.0.0 | grep -A5 -i healthcheck
-podman run --rm service-pack-release-dashboard:1.0.0 sh -c "du -sh /app/node_modules && ls /app"
+podman inspect service-pack-release-dashboard:1.3.0 | grep -A5 -i healthcheck
+podman run --rm service-pack-release-dashboard:1.3.0 sh -c "du -sh /app/node_modules && ls /app"
 
 # Export for transfer (only if not pushing to a registry — see build-push.ps1/.sh)
-podman save -o service-pack-release-dashboard.tar service-pack-release-dashboard:1.0.0
+podman save --format docker-archive -o service-pack-release-dashboard-1.3.0.tar service-pack-release-dashboard:1.3.0
 ```
 
-On the target machine: `podman load -i service-pack-release-dashboard.tar`.
+On the target machine: `podman load -i service-pack-release-dashboard-1.3.0.tar`.
 
 ## 5. Runtime deployment (rootless Podman + host nginx)
 
@@ -195,7 +205,8 @@ NGINX public :18087 (TLS)  →  Podman loopback :28087  →  container :8080
 
 Copy the `.env` delivered alongside the image tar to the host (or populate
 a copy of [`.env.example`](.env.example)). The delivered file contains only
-the two in-container planning/PDF paths shown in Section 3b. Adjust the
+the in-container planning/PDF paths shown in Section 3b. Add
+`IB_SYSTEM_VERSIONS_XLSX_PATH` if using a live IB workbook instead of the bundled copy. Adjust the
 paths if the administrator chooses a different container mount point.
 Keep credentials out of this file; if adding TFS credentials later, protect
 and distribute it as a secret. Install it outside git, readable only by
@@ -217,7 +228,7 @@ podman run -d --name spr-dashboard \
   --security-opt no-new-privileges \
   --env-file /opt/spr-dashboard/.env \
   -v /mnt/bangalore3:/mnt/bangalore3:ro \
-  localhost/service-pack-release-dashboard:1.2.0
+  localhost/service-pack-release-dashboard:1.3.0
 ```
 
 If decision (A) in Section 3 applies, add its CA bind mount to this command.

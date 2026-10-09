@@ -79,7 +79,21 @@ network share, or leave it unset to serve the bundled copy in `public/`. See
 [`docker/README-deploy.md`](docker/README-deploy.md) section "Planning workbook source" for the
 exact path and the Linux CIFS-mount requirement (same share as the planning workbook).
 
+## IB System Versions source
+
+`GET /api/ib-system-versions-xlsx` serves `ib-system-release-versions.xlsx`, which backs the
+IB System Versions tab (one sub-tab per sheet: `Win10 1607`, `Win10 1809`, `Win10 2021`).
+Same live-source-with-fallback pattern: set `IB_SYSTEM_VERSIONS_XLSX_PATH` to read the live
+workbook from the network share, or leave it unset to serve the bundled copy in this repo.
+Columns are read from each sheet's own header row, so the three sheets may keep their slightly
+different header names.
+
 ## Container image (Podman/Docker)
+
+Release **1.3.0** includes the refreshed dashboard, compact quarterly charts, and the
+IB System Versions view with distinct AS-version counts for each OS tab. Export the
+image as `service-pack-release-dashboard-1.3.0.tar`; keep the runtime `.env` separate.
+See the deployment guide below for build, export, and load commands.
 
 The app is packaged as a single OCI image: a multi-stage build compiles the Vite/React SPA,
 then a slim `node:22-alpine` runtime serves `dist/` and the Express API/TFS proxy

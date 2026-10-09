@@ -119,22 +119,27 @@ app.get('/api/tasks', async (req, res) => {
 // so the dashboard degrades gracefully rather than failing outright.
 const BUNDLED_XLSX_PATH = path.join(__dirname, 'service-pack-planning.xlsx');
 
-app.get('/api/service-pack-xlsx', (req, res) => {
+// Same live-share-with-bundled-fallback pattern for the IB system release
+// versions workbook (installed-base systems per Windows 10 OS version).
+const BUNDLED_IB_VERSIONS_XLSX_PATH = path.join(__dirname, 'ib-system-release-versions.xlsx');
+
+/** Serves an xlsx as base64 JSON from envVar's path, falling back to the bundled copy. */
+const sendWorkbook = (res, envVar, bundledPath) => {
   // Always re-read from disk and never let the browser cache this response —
-  // the whole point of SP_PLANNING_XLSX_PATH is that edits to the live
+  // the whole point of the *_XLSX_PATH variables is that edits to the live
   // workbook show up on the next fetch, not the next deployment.
   res.setHeader('Cache-Control', 'no-store');
-  const externalPath = process.env.SP_PLANNING_XLSX_PATH;
+  const externalPath = process.env[envVar];
   const candidates = externalPath
-    ? [{ filePath: externalPath, source: 'external' }, { filePath: BUNDLED_XLSX_PATH, source: 'bundled-fallback' }]
-    : [{ filePath: BUNDLED_XLSX_PATH, source: 'bundled' }];
+    ? [{ filePath: externalPath, source: 'external' }, { filePath: bundledPath, source: 'bundled-fallback' }]
+    : [{ filePath: bundledPath, source: 'bundled' }];
 
   for (const candidate of candidates) {
     try {
       if (!fs.existsSync(candidate.filePath)) continue;
       const data = fs.readFileSync(candidate.filePath);
       if (candidate.source === 'bundled-fallback') {
-        console.warn(`SP_PLANNING_XLSX_PATH ("${externalPath}") was unreadable; served the bundled fallback copy instead.`);
+        console.warn(`${envVar} ("${externalPath}") was unreadable; served the bundled fallback copy instead.`);
       }
       return res.json({
         fileName: path.basename(candidate.filePath),
@@ -142,13 +147,18 @@ app.get('/api/service-pack-xlsx', (req, res) => {
         source: candidate.source,
       });
     } catch (error) {
-      console.error(`Error reading planning workbook at "${candidate.filePath}":`, error?.message || error);
+      console.error(`Error reading workbook at "${candidate.filePath}":`, error?.message || error);
       // fall through to the next candidate (bundled fallback, if any)
     }
   }
 
-  return res.status(404).json({ error: 'service-pack-planning.xlsx not found (checked configured source and bundled fallback).' });
-});
+  return res.status(404).json({ error: `${path.basename(bundledPath)} not found (checked configured source and bundled fallback).` });
+};
+
+app.get('/api/service-pack-xlsx', (req, res) => sendWorkbook(res, 'SP_PLANNING_XLSX_PATH', BUNDLED_XLSX_PATH));
+
+app.get('/api/ib-system-versions-xlsx', (req, res) =>
+  sendWorkbook(res, 'IB_SYSTEM_VERSIONS_XLSX_PATH', BUNDLED_IB_VERSIONS_XLSX_PATH));
 
 // Source of truth for the SP Guideline PDF. Set SP_GUIDELINE_PDF_PATH to read
 // live from the shared network location instead of the bundled snapshot —

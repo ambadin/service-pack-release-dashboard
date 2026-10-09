@@ -52,8 +52,8 @@ RUN npm ci --omit=dev --no-audit --no-fund \
     && rm -rf /root/.npm /tmp/*
 
 COPY server.js ./
-# Read directly from disk by the /api/service-pack-xlsx route (not part of the Vite bundle)
-COPY service-pack-planning.xlsx ./
+# Read directly from disk by the /api/*-xlsx routes (not part of the Vite bundle)
+COPY service-pack-planning.xlsx ib-system-release-versions.xlsx ./
 # Built SPA + files copied from public/ (index.html, service-pack-planning.csv, PDF guideline)
 COPY --from=builder /app/dist ./dist
 
